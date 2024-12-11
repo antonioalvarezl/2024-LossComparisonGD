@@ -1,4 +1,4 @@
-# Loss Optimization
+# Comparison of some Losses for Gradient Descent Optimization
 
 ## Description
 Comparison between performance of different loss functions (KL divergence, L1, L2) in gradient descent optimization.
