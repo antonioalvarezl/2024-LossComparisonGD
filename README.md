@@ -51,20 +51,6 @@ All results are saved in the `Results` directory, organized by parameters and op
 - **JSON Files**:
   - `InitialValues.json`: Initial parameters and optimization settings.
 
-## Examples
-
-### Final Distribution
-
-![Final Distribution](https://via.placeholder.com/400x300.png?text=Final+Distribution)
-
-### Error Decay
-
-![Error Decay](https://via.placeholder.com/400x300.png?text=Error+Decay)
-
-### Parameter Evolution
-
-![Evolution GIF](https://via.placeholder.com/400x300.png?text=Evolution+GIF)
-
 ## Repository Structure
 
 ```
