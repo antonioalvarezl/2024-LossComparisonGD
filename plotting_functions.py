@@ -1,7 +1,8 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FuncAnimation, PillowWriter
+from mpl_toolkits.mplot3d import Axes3D
 from tqdm import tqdm  # Import tqdm for progress bar
 
 # Define the get_unique_directory function
@@ -17,59 +18,117 @@ def get_unique_directory(base_directory, base_name):
             os.makedirs(full_path)
             return full_path
         i += 1
+def get_user_input(prompt):
+    while True:
+        user_input = input(prompt).strip().lower()
+        if user_input in ['yes', 'no']:
+            return user_input == 'yes'
+        print("Invalid input. Please enter 'yes' or 'no'.")
     
-def plot_final_distr(x, target_density, model_density, results_dict, filename, output_directory, method='standard'):
+def get_domain(dim, bounds, grid_points, x=None):
+    """Generate grid points for density estimation."""
+    if dim == 1:
+        x = np.linspace(bounds[0][0], bounds[1][0], grid_points)
+        dx = x[1] - x[0]
+    elif dim >= 2:
+        linspaces = [np.linspace(lb, ub, grid_points) for lb, ub in zip(bounds[0], bounds[1])]
+        x = np.meshgrid(*linspaces, indexing='ij')
+        dx = np.prod([(ub - lb) / (grid_points - 1) for lb, ub in zip(bounds[0], bounds[1])])
+    else:
+        raise ValueError("Dimension must be >= 1.")
+    return x, dx
+    
+def plot_final_distr(results_dict, x, target_density, model_density, filename, output_directory, method='standard', dpi=100, plot3d=False):
     """
-    Plot the final estimated distributions against the target distribution.
-
-    Parameters:
-    - x: The domain for plotting.
-    - target_density: Function to compute the target density.
-    - model_density: Function to compute the model density.
-    - results_dict: Dictionary containing optimization results for each objective.
-    - filename: Name of the output image file.
-    - output_directory: Directory where the image will be saved.
-    - method: The optimization method used.
+    Plot the final estimated distributions against the target distribution, one subplot per objective.
     """
-    import matplotlib.pyplot as plt
-    import os
-
-    # Remove the creation of 'Figures' directory
-
-    plt.figure(figsize=(10, 6))
-
-    # Plot the estimated distributions first
-    for objective in ['kl', 'l1', 'l2']:
-        optimal_means = results_dict[objective]['optimal_means']
-        optimal_variances = results_dict[objective]['optimal_variances']
-        optimal_weights = results_dict[objective]['optimal_weights']
-        est_distribution = model_density(
-            x,
-            optimal_means,
-            optimal_variances,
-            optimal_weights
-        )
-        label = f'{objective.upper()} Optimization'
-        if method == 'alternating':
-            label += ' (Alternating Gradient Descent)'
-        elif method == 'adam':
-            label += ' (Adam)'
-        plt.plot(x, est_distribution, label=label, linewidth=2)
-
-    # Plot the target distribution on top
-    plt.plot(x, target_density(x), label='Target Distribution', linewidth=3, color='black', linestyle='--', zorder=5)
-
-    plt.xlabel('x')
-    plt.ylabel('Probability Density')
-    plt.title('Final Estimated Distributions vs. Target Distribution')
-    plt.legend()
-    plt.grid(True)
-    # Save the figure
+    objectives = ['kl', 'l1', 'l2']
     image_path = os.path.join(output_directory, filename)
-    plt.savefig(image_path)
-    plt.close()  # Close the figure to free up memory
+    single_variable = np.ndim(x) == 1
 
-def plot_error_decay(results_dict, filename, output_directory, method='standard'):
+    def generate_3d_plot():
+        X, Y = x
+        grid_points = np.column_stack([X.ravel(), Y.ravel()])
+        Z_target = target_density(grid_points).reshape(X.shape)
+        
+        fig = plt.figure(figsize=(20, 7), dpi=dpi)
+
+        for i, obj in enumerate(objectives):
+            params = results_dict[obj]
+            Z_model = model_density(grid_points, params['optimal_means'], 
+                                    params['optimal_variances'], 
+                                    params['optimal_weights']).reshape(X.shape)
+
+            ax = fig.add_subplot(1, 3, i + 1, projection='3d')
+            ax.plot_surface(X, Y, Z_target, cmap='winter', alpha=0.9)
+            ax.plot_surface(X, Y, Z_model, cmap='gray', alpha=0.5)
+            ax.set_title(f"{obj.upper()} Distribution ({method.capitalize() if method != 'standard' else ''})")
+            ax.set(xlabel='X', ylabel='Y', zlabel='Density')
+            ax.set_xlim(X.min(), X.max())
+            ax.set_ylim(Y.min(), Y.max())
+        plt.tight_layout()
+        return fig
+
+    def generate_2d_contour_plot():
+        X, Y = x
+        grid_points = np.column_stack([X.ravel(), Y.ravel()])
+        Z_target = target_density(grid_points).reshape(X.shape)
+
+        fig, axes = plt.subplots(1, len(objectives), figsize=(20, 7), dpi=dpi)
+        if not isinstance(axes, np.ndarray):
+            axes = [axes]
+
+        for ax, obj in zip(axes, objectives):
+            params = results_dict[obj]
+            Z_model = model_density(grid_points, params['optimal_means'], params['optimal_variances'], params['optimal_weights']).reshape(X.shape)
+
+            ax.contourf(X, Y, Z_target, 20, cmap='winter', alpha=0.7)
+            ax.contour(X, Y, Z_model, levels=30, cmap='viridis', linestyles='solid', alpha=0.6)
+
+            optimal_means = np.array(params['optimal_means'])
+            ax.scatter(optimal_means[:, 0], optimal_means[:, 1], color='black', s=100, edgecolor='white', label='Optimal Means')
+            ax.set_title(f"Final {obj.upper()} Distribution {f'({method.capitalize()})' if method != 'standard' else ''}")
+            ax.set(xlabel='X', ylabel='Y')
+            ax.set_xlim(X.min(), X.max())
+            ax.set_ylim(Y.min(), Y.max())
+        return fig
+
+    def generate_1d_plot():
+        fig = plt.figure(figsize=(10, 6))
+
+        for obj in objectives:
+            params = results_dict[obj]
+            est_dist = model_density(x, params['optimal_means'], params['optimal_variances'], params['optimal_weights'])
+            label = f'{obj.upper()} Optimization'
+            if method == 'alternating':
+                label += ' (Alternating Gradient Descent)'
+            elif method == 'adam':
+                label += ' (Adam)'
+
+            plt.plot(x, est_dist, label=label, linewidth=2)
+        plt.plot(x, target_density(x), label='Target Distribution', linewidth=3, color='black', linestyle='--', zorder=5)
+        plt.xlabel('x')
+        plt.ylabel('Probability Density')
+        plt.title('Final Estimated Distributions vs. Target Distribution')
+        plt.legend(loc='upper right')
+        plt.grid(True)
+        plt.xlim(x.min(), x.max())
+        return fig
+
+    # Select the appropriate plot generation function
+    if single_variable:
+        fig = generate_1d_plot()
+    elif plot3d:
+        fig = generate_3d_plot()
+    else:
+        fig = generate_2d_contour_plot()
+
+    plt.tight_layout()
+    plt.savefig(image_path, dpi=dpi)
+    plt.close(fig)
+
+
+def plot_error_decay(results_dict, filename, output_directory, method='standard', dpi=100):
     """
     Plot the decay of the error function with respect to iterations for all three objectives,
     both in linear and logarithmic scales in the same figure.
@@ -80,19 +139,19 @@ def plot_error_decay(results_dict, filename, output_directory, method='standard'
     - output_directory: Directory where the image will be saved.
     - method: The optimization method used.
     """
-    import matplotlib.pyplot as plt
-    import os
-
-    # Remove the creation of 'Figures' directory
 
     # Create a figure with two subplots
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6), dpi=80)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6), dpi=dpi)
 
     # Plot in linear scale
     ax = axes[0]
-    for objective in ['kl', 'l1', 'l2']:
+    colors = {'kl': 'blue', 'l1': 'green', 'l2': 'red'}
+    for objective in ['kl', 'l1']:
         values = results_dict[objective]['objective_values']
-        ax.plot(values, label=f'{objective.upper()} Optimization')
+        ax.plot(values, label=f'{objective.upper()} Optimization', color=colors[objective])
+    for objective in ['kl', 'l1', 'l2']:
+        l2_values = results_dict[objective]['l2_values']
+        ax.plot(l2_values, label=f'{objective.upper()} Optimization (L2 Norm)', linestyle='--', color=colors[objective], linewidth=2)
     ax.set_xlabel('Iteration')
     ax.set_ylabel('Objective Value')
     title_linear = 'Error Function Decay (Linear Scale)'
@@ -101,14 +160,20 @@ def plot_error_decay(results_dict, filename, output_directory, method='standard'
     elif method == 'adam':
         title_linear += ' (Adam)'
     ax.set_title(title_linear)
-    ax.legend()
+    ax.legend(loc='upper right')
     ax.grid(True)
+    ax.xaxis.set_major_locator(plt.MaxNLocator(10))  # More ticks on x-axis
+    ax.yaxis.set_major_locator(plt.MaxNLocator(10))  # More ticks on y-axis
 
     # Plot in logarithmic scale
     ax = axes[1]
-    for objective in ['kl', 'l1', 'l2']:
+    colors = {'kl': 'blue', 'l1': 'green', 'l2': 'red'}
+    for objective in ['kl', 'l1']:
         values = results_dict[objective]['objective_values']
-        ax.plot(values, label=f'{objective.upper()} Optimization')
+        ax.plot(values, label=f'{objective.upper()} Optimization', color=colors[objective])
+    for objective in ['kl', 'l1', 'l2']:
+        l2_values = results_dict[objective]['l2_values']
+        ax.plot(l2_values, label=f'{objective.upper()} Optimization (L2 Norm)', linestyle='--', color=colors[objective], linewidth=2)
     ax.set_xlabel('Iteration')
     ax.set_ylabel('Objective Value')
     title_log = 'Error Function Decay (Logarithmic Scale)'
@@ -118,9 +183,9 @@ def plot_error_decay(results_dict, filename, output_directory, method='standard'
         title_log += ' (Adam)'
     ax.set_title(title_log)
     ax.set_yscale('log')
-    ax.legend()
+    ax.legend(loc='upper right')
     ax.grid(True, which="both", ls="--")
-
+    
     # Adjust layout
     plt.tight_layout()
 
@@ -128,159 +193,207 @@ def plot_error_decay(results_dict, filename, output_directory, method='standard'
     image_path = os.path.join(output_directory, filename)
     plt.savefig(image_path)
     plt.close(fig)
-    
-def create_combined_gif(results_dict, x, target_density, model_density, max_iterations, filename, output_directory, frame_step=5, method='standard', chosen_params=None):
-    """
-    Create a GIF showing the evolution of the estimated distributions for different objectives.
 
-    Parameters:
-    - results_dict: Dictionary containing optimization results.
-    - x: Domain for plotting.
-    - target_density: Function to compute the target density.
-    - model_density: Function to compute the model density.
-    - max_iterations: Maximum number of iterations.
-    - filename: Name of the output GIF file.
-    - output_directory: Directory where the GIF will be saved.
-    - frame_step: Step size for frames in the GIF.
-    - method: Optimization method used.
-    - chosen_params: List of parameters to optimize.
-    """
-    from matplotlib.animation import PillowWriter
+def gif_generator(results_dict, x, target_density, model_density, max_iterations, output_directory, frame_step=5, method="standard", dpi=100, error=False, dist_filename="Distribution.gif", error_filename="Error.gif"):
 
-    gif_path = os.path.join(output_directory, filename)
+    os.makedirs(output_directory, exist_ok=True)
 
-    fig, axes = plt.subplots(3, 1, figsize=(10, 18), dpi=80)
-    plt.tight_layout(pad=4.0)
-
+    # Determine dimensionality
+    dim = 2 if isinstance(x, (tuple, list)) and len(x) == 2 else 1
     frames = range(0, max_iterations, frame_step)
+    if not frames:
+        print("No frames to animate. Check 'max_iterations' or 'frame_step'.")
+        return
 
-    print("Creating combined GIF...")
-    pbar = tqdm(total=len(frames))
+    # Precompute target distribution (1D or 2D)
+    if dim == 2:
+        X, Y = x
+        grid_points = np.column_stack([X.ravel(), Y.ravel()])
+        Z_target = target_density(grid_points).reshape(X.shape)
+    else:
+        x_values = x
+        Z_target = target_density(x_values)
 
-    def update(frame):
-        for ax, objective in zip(axes, ['kl', 'l1', 'l2']):
-            ax.clear()
-            params_history = results_dict[objective]['params_history']
-            idx = min(frame, len(params_history)-1)
-            means, variances, weights = params_history[idx]
-            estimated_distribution = model_density(x, means, variances, weights)
-            target_distribution = target_density(x)
-            
-            # Plot distributions
-            ax.plot(x, estimated_distribution, label=f"Iteration {idx}", alpha=0.7)
-            ax.plot(x, target_distribution, label="Target Distribution", color="black", linewidth=2)
-            
-            # Mark each Gaussian mean on the x-axis
-            ax.scatter(means, np.zeros_like(means), marker='s', s=100, label='Model Means')
-            
-            ax.set_xlabel("x")
-            ax.set_ylabel("Probability Density")
-            title = f"{objective.upper()} Optimization"
-            if method == 'alternating':
-                title += " (Alternating GD)"
-            elif method == 'adam':
-                title += " (Adam)"
-            elif method == 'stagewise':
-                param_index = frame // (max_iterations // len(chosen_params))
-                param_name = chosen_params[min(param_index, len(chosen_params)-1)]
-                title += f" (Stagewise): Optimizing {param_name.capitalize()}"
-            ax.set_title(title)
-            ax.legend()
-            ax.set_xlim(np.min(x), np.max(x))
-            ax.set_ylim(0, max(target_distribution)*1.2)
-        pbar.update(1)
+    objectives = ["kl", "l1", "l2"]
 
-    ani = FuncAnimation(fig, update, frames=frames, repeat=False)
+    # ------------------------
+    # 1) Distribution GIF
+    # ------------------------
+    dist_gif_path = os.path.join(output_directory, dist_filename)
+    fig_dist, axes_dist = plt.subplots(1, len(objectives), figsize=(20, 7), dpi=dpi)
+    if not isinstance(axes_dist, np.ndarray):
+        axes_dist = [axes_dist]
 
-    writer = PillowWriter(fps=10)
-    ani.save(gif_path, writer=writer)
-    pbar.close()
-    plt.close(fig)
+    # Basic axis setup
+    for ax in axes_dist:
+        ax.set_xlabel("X" if dim == 2 else "x")
+        ax.set_ylabel("Y" if dim == 2 else "Density")
 
-def create_error_evolution_gif(results_dict, x, target_density, model_density, max_iterations, filename, output_directory, frame_step=5, method='standard'):
-    """
-    Create a GIF showing the evolution of the difference between the target function and the model
-    for all three objectives, with fixed y-axis scales.
+    # Dictionary to store plot elements for each objective
+    plot_elems_dist = {obj: {} for obj in objectives}
 
-    Parameters:
-    - results_dict: Dictionary containing optimization results.
-    - x: Domain for plotting.
-    - target_density: Function to compute the target density.
-    - model_density: Function to compute the model density.
-    - max_iterations: Maximum number of iterations.
-    - filename: Name of the output GIF file.
-    - output_directory: Directory where the GIF will be saved.
-    - frame_step: Step size for frames in the GIF.
-    - method: Optimization method used.
-    """
-    import matplotlib.pyplot as plt
-    from matplotlib.animation import FuncAnimation, PillowWriter
-    import os
-    from tqdm import tqdm
+    # Initialize each axis with the target distribution
+    for ax, obj in zip(axes_dist, objectives):
+        if dim == 2:
+            # Plot the target distribution as background contour
+            ax.contourf(X, Y, Z_target, levels=20, cmap="winter", alpha=0.7)
+            scatter = ax.scatter([], [], marker="s", s=30, color="navy", edgecolors="black")
+            plot_elems_dist[obj]["scatter"] = scatter
+            plot_elems_dist[obj]["contour"] = None
+            ax.set_xlim(X.min(), X.max())
+            ax.set_ylim(Y.min(), Y.max())
+        else:
+            # Plot target distribution (1D)
+            ax.plot(x_values, Z_target, label="Target", color="black")
+            line, = ax.plot([], [], label=f"Model", color="blue")
+            scatter = ax.scatter([], [], marker="s", s=50, color="navy", edgecolors="black")
+            ax.legend(loc='upper right')
+            ax.set_xlim(x_values.min(), x_values.max())
+            margin = 0.1 * (Z_target.max() - Z_target.min())
+            ax.set_ylim(Z_target.min() - margin, Z_target.max() + margin)
+            plot_elems_dist[obj]["line"] = line
+            plot_elems_dist[obj]["scatter"] = scatter
 
-    # Remove the creation of 'Gifs' directory
+    def update_distribution(frame):
+        for ax, obj in zip(axes_dist, objectives):
+            idx = min(frame, len(results_dict[obj]["params_history"]) - 1)
+            means, variances, weights = results_dict[obj]["params_history"][idx]
 
-    # Update the filename to include the full path
-    gif_path = os.path.join(output_directory, filename)
+            if dim == 2:
+                # Remove old contour for this objective
+                if plot_elems_dist[obj]["contour"] is not None:
+                    for c in plot_elems_dist[obj]["contour"].collections:
+                        c.remove()
 
-    fig, axes = plt.subplots(3, 1, figsize=(10, 18), dpi=80)
-    plt.tight_layout(pad=4.0)
+                Z_model = model_density(grid_points, means, variances, weights).reshape(X.shape)
+                contour = ax.contour(X, Y, Z_model, levels=25, cmap="viridis", linestyles="solid", alpha=0.6)
+                plot_elems_dist[obj]["contour"] = contour
+                # Update scatter (2D means)
+                scatter_sizes = 100 * np.array(weights) / np.sum(weights)  
+                plot_elems_dist[obj]["scatter"].set_offsets(np.array(means)[:, :2])
+                plot_elems_dist[obj]['scatter'].set_sizes(scatter_sizes)
+            else:
+                # Update 1D line
+                est_dist = model_density(x_values, means, variances, weights)
+                plot_elems_dist[obj]["line"].set_data(x_values, est_dist)
+                # Scatter for the means (assume means is 1D array)
+                scatter_sizes = 50 * np.array(weights) / np.sum(weights) 
+                plot_elems_dist[obj]['scatter'].set_offsets(np.c_[means, np.zeros_like(means)])
+                plot_elems_dist[obj]['scatter'].set_sizes(scatter_sizes)
+            title = f"{obj.upper()} Optimization - Iteration {frame}"
+            if method != "standard":
+                title += f" ({method.capitalize()})"
+            ax.set_title(title, fontsize=12)
 
-    target_distribution = target_density(x)
+    print("Creating distribution GIF...")
+    pbar_dist = tqdm(total=len(frames))
 
-    frames = range(0, max_iterations, frame_step)
+    def distribution_progress(frame):
+        update_distribution(frame)
+        pbar_dist.update(1)
 
-    # Create a progress bar
-    print("Creating error evolution GIF...")
-    pbar = tqdm(total=len(frames))
+    ani_dist = FuncAnimation(fig_dist, distribution_progress, frames=frames, repeat=False)
+    ani_dist.save(dist_gif_path, writer="pillow")
+    pbar_dist.close()
+    plt.close(fig_dist)
+    print(f"Distribution GIF saved at: {dist_gif_path}")
 
-    # Precompute global y-axis limits for each subplot
-    error_values = {'kl': [], 'l1': [], 'l2': []}
+    # ------------------------
+    # 2) Error GIF (optional)
+    # ------------------------
+    if error:
+        error_path = os.path.join(output_directory, error_filename)
+        fig_err, axes_err = plt.subplots(1, len(objectives), figsize=(20, 7), dpi=dpi)
+        if not isinstance(axes_err, np.ndarray):
+            axes_err = [axes_err]
 
-    # Collect error values across all frames for each objective
-    for frame in frames:
-        for objective in ['kl', 'l1', 'l2']:
-            params_history = results_dict[objective]['params_history']
-            idx = min(frame, len(params_history)-1)
-            means, variances, weights = params_history[idx]
-            estimated_distribution = model_density(x, means, variances, weights)
-            error = target_distribution - estimated_distribution
-            error_values[objective].extend(error)
+        # Store contour/colorbar or line references to remove them each frame
+        plot_elems_err = {
+            obj: {"contour": None, "colorbar": None, "lines": []} for obj in objectives
+        }
 
-    # Compute global min and max for y-axis limits
-    y_limits = {}
-    for objective in ['kl', 'l1', 'l2']:
-        errors = np.array(error_values[objective])
-        ymin, ymax = np.min(errors)*1.2, np.max(errors)*1.2
-        y_limits[objective] = (ymin, ymax)
+        # Precompute global min/max for errors to keep a consistent color scale (or y-limits)
+        y_limits = {}
+        for obj in objectives:
+            all_errors = []
+            for frame_idx in frames:
+                idx = min(frame_idx, len(results_dict[obj]["params_history"]) - 1)
+                means, variances, weights = results_dict[obj]["params_history"][idx]
+                if dim == 2:
+                    Z_model = model_density(grid_points, means, variances, weights).reshape(X.shape)
+                    error = Z_target - Z_model
+                    all_errors.append(error.ravel())
+                else:
+                    Z_model = model_density(x_values, means, variances, weights)
+                    error = Z_target - Z_model
+                    all_errors.append(error)
+            all_errors = np.concatenate(all_errors)
+            y_min, y_max = all_errors.min(), all_errors.max()
+            # Add some margin
+            y_limits[obj] = (1.2 * y_min, 1.2 * y_max)
 
-    def update(frame):
-        for ax, objective in zip(axes, ['kl', 'l1', 'l2']):
-            ax.clear()
-            params_history = results_dict[objective]['params_history']
-            idx = min(frame, len(params_history)-1)
-            means, variances, weights = params_history[idx]
-            estimated_distribution = model_density(x, means, variances, weights)
-            error = target_distribution - estimated_distribution
-            ax.plot(x, error, label=f"Iteration {idx}", alpha=0.7)
-            ax.set_xlabel("x")
-            ax.set_ylabel("Error")
-            title = f"{objective.upper()} Optimization Error Evolution"
-            if method == 'alternating':
-                title += " (Alternating Gradient Descent)"
-            elif method == 'adam':
-                title += " (Adam)"
-            ax.set_title(title)
-            ax.legend()
-            ax.set_xlim(-10, 10)
-            ymin, ymax = y_limits[objective]
-            ax.set_ylim(ymin, ymax)
-        pbar.update(1)  # Update progress bar
+        def update_error(frame):
+            for ax, obj in zip(axes_err, objectives):
+                # Remove old contours, colorbars, or lines
+                if plot_elems_err[obj]["contour"] is not None:
+                    for c in plot_elems_err[obj]["contour"].collections:
+                        c.remove()
+                    plot_elems_err[obj]["contour"] = None
 
-    ani = FuncAnimation(fig, update, frames=frames, repeat=False)
+                if plot_elems_err[obj]["colorbar"] is not None:
+                    plot_elems_err[obj]["colorbar"].remove()
+                    plot_elems_err[obj]["colorbar"] = None
 
-    # Save the animation with PillowWriter
-    writer = PillowWriter(fps=10)
-    ani.save(gif_path, writer=writer)
-    pbar.close()
-    plt.close(fig)
+                for ln in plot_elems_err[obj]["lines"]:
+                    ln.remove()
+                plot_elems_err[obj]["lines"].clear()
+
+                idx = min(frame, len(results_dict[obj]["params_history"]) - 1)
+                means, variances, weights = results_dict[obj]["params_history"][idx]
+
+                if dim == 2:
+                    Z_model = model_density(grid_points, means, variances, weights).reshape(X.shape)
+                    error = abs(Z_target - Z_model)
+                    # Create a new contour for the error
+                    contour_err = ax.contourf(X, Y, error, levels=20, cmap="Wistia")
+                    # Add a colorbar and store it
+                    cb_err = fig_err.colorbar(contour_err, ax=ax, shrink=0.8)
+                    plot_elems_err[obj]["contour"] = contour_err
+                    plot_elems_err[obj]["colorbar"] = cb_err
+
+                    ax.set_xlim(X.min(), X.max())
+                    ax.set_ylim(Y.min(), Y.max())
+                    ax.set_xlabel("X")
+                    ax.set_ylabel("Y")
+
+                else:
+                    Z_model = model_density(x_values, means, variances, weights)
+                    error = Z_target - Z_model
+                    line_err, = ax.plot(x_values, error, label=f"Iteration {idx}", color="red")
+                    plot_elems_err[obj]["lines"].append(line_err)
+                    ax.set_xlim(x_values.min(), x_values.max())
+                    ymin, ymax = y_limits[obj]
+                    ax.set_ylim(ymin, ymax)
+                    ax.set_xlabel("x")
+                    ax.set_ylabel("Error")
+                    ax.legend(loc='upper right')
+
+                title = f"{obj.upper()} Error Evolution"
+                if method != "standard":
+                    title += f" ({method.capitalize()})"
+                ax.set_title(title, fontsize=12)
+
+        print("Creating error GIF...")
+        pbar_err = tqdm(total=len(frames))
+
+        def error_progress(frame):
+            update_error(frame)
+            pbar_err.update(1)
+
+        ani_err = FuncAnimation(fig_err, error_progress, frames=frames, repeat=False)
+        ani_err.save(error_path, writer=PillowWriter(fps=10))
+        pbar_err.close()
+        plt.close(fig_err)
+        print(f"Error GIF saved at: {error_path}")
+
+    print("GIF generation completed.")
