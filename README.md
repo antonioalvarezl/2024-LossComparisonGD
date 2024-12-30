@@ -1,9 +1,9 @@
 # Comparison of some Losses for Gradient Descent Optimization
 
 ## Description
-Comparison between performance of different loss functions (KL divergence, L1, L2) in gradient descent optimization.
+Comparison between performance of different loss functions (KL divergence, L1, L2) for gradient descent optimization in arbitrary dimensions
 
-The goal is to optimize the parameters (means, variances, and weights) of a Gaussian mixture (the model) using various gradient descent methods, so as to abest fit a user-defined target Gaussian mixture. Additionally, it generates visualizations and animations to illustrate the optimization process and parameter evolution.
+The goal is to optimize the parameters (means, variances, and weights) of a Gaussian mixture (the model) using various gradient descent methods, so as to best fit a user-defined target Gaussian mixture. Additionally, it generates visualizations and animations to illustrate the optimization process and parameter evolution.
 
 ## Features
 
