@@ -7,7 +7,7 @@ The goal is to optimize the parameters (means, variances, and weights) of a Gaus
 
 **Example:** 
 Approximate a target using a mixture of 4 gaussians (only means are being optimized)
-![Descripción del GIF](Results/visualization.gif)
+![aaa](Results/Distribution.gif)
 
 ## Features
 
