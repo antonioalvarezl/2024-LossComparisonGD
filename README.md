@@ -55,16 +55,14 @@ All results are saved in the `Results` directory, organized by parameters and op
 
 ```
 gaussian-mixture-optimization/
+├── run_optimization.py
 ├── gauss_mix_optimization.py
 ├── plotting_functions.py
-├── main.py
-├── requirements.txt
 ├── README.md
 └── Results/
 ```
 
+- **run_optimization.py**: Main script to run the optimization process.
 - **gauss_mix_optimization.py**: Contains functions for Gaussian mixture optimization.
 - **plotting_functions.py**: Contains functions for generating visualizations and animations.
-- **main.py**: Main script to run the optimization process.
-- **requirements.txt**: Lists the necessary dependencies.
 - **Results/**: Directory where all optimization results are saved.
