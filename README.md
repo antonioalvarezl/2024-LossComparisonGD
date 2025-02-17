@@ -5,6 +5,10 @@ Comparison between performance of different loss functions (KL divergence, L1, L
 
 The goal is to optimize the parameters (means, variances, and weights) of a Gaussian mixture (the model) using various gradient descent methods, so as to best fit a user-defined target Gaussian mixture. Additionally, it generates visualizations and animations to illustrate the optimization process and parameter evolution.
 
+**Example:** 
+Approximate a target using a mixture of 4 gaussians (only means are being optimized)
+![Descripción del GIF](Results/visualization.gif)
+
 ## Features
 
 - **Flexible Optimization**: Optimize means, variances, and/or weights of the mixture.
