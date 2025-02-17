@@ -7,8 +7,8 @@ The goal is to optimize the parameters (means, variances, and weights) of a Gaus
 
 **Example:** 
 Approximate a target using a mixture of 4 gaussians (only means are being optimized)
-![aaa](Results/Distribution.gif)
-![Loss evolution. Left: measured on each loss linearly. Right: measured on L2 logarithmically](Results/imagen.jpg)
+![Model evolution](Results/Distribution.gif)
+![Loss evolution. Left: measured on each loss linearly. Right: measured on L2 logarithmically](Results/means_var_1_s15.png)
 
 ## Features
 
